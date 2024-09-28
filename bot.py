@@ -10,6 +10,7 @@ from collections import deque
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
+DISCORD_ID = os.getenv('DISCORD_ID')
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -52,7 +53,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
             discord.FFmpegPCMAudio(filename, **ffmpeg_options), data=data
         )
 
-def play_next(interaction, error):
+def play_next(interaction, error, loop):
     if error:
         print(f'Error in playback: {error}')
     guild = interaction.guild
@@ -63,17 +64,17 @@ def play_next(interaction, error):
         try:
             voice_client.play(
                 next_song['player'],
-                after=lambda e: play_next(interaction, e) if not e else print(f'Player error: {e}')
+                after=lambda e: play_next(interaction, e, loop) if not e else print(f'Player error: {e}')
             )
             coro = interaction.followup.send(f'Now playing: {next_song["title"]}')
-            asyncio.run_coroutine_threadsafe(coro, asyncio.get_event_loop())
+            asyncio.run_coroutine_threadsafe(coro, loop)
         except Exception as e:
             print(f'Error playing next song: {e}')
             coro = interaction.followup.send(f'An error occurred: {e}')
-            asyncio.run_coroutine_threadsafe(coro, asyncio.get_event_loop())
+            asyncio.run_coroutine_threadsafe(coro, loop)
     elif voice_client:
         coro = interaction.followup.send('No more songs in the queue.')
-        asyncio.run_coroutine_threadsafe(coro, asyncio.get_event_loop())
+        asyncio.run_coroutine_threadsafe(coro, loop)
     else:
         print('Voice client not connected.')
 
@@ -128,7 +129,7 @@ async def play(interaction: discord.Interaction, url: str):
         else:
             try:
                 voice_client.play(
-                    player, after=lambda e: play_next(interaction, e) if not e else print(f'Player error: {e}')
+                    player, after=lambda e: play_next(interaction, e, bot.loop) if not e else print(f'Player error: {e}')
                 )
                 embed = discord.Embed(
                     title="Now Playing",
@@ -175,7 +176,12 @@ async def queue_(interaction: discord.Interaction):
             msg += f"{idx}. {song['title']}\n"
         await interaction.response.send_message(msg)
     else:
-        await interaction.response.send_message("The queue is empty.")
+        embed = discord.Embed(
+            title="Queue is empty",
+            description="There are no songs in the queue.",
+            color=discord.Color.yellow()
+        )
+        await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name='clear', description='Clears the music queue')
 async def clear(interaction: discord.Interaction):
@@ -194,7 +200,12 @@ async def quit(interaction: discord.Interaction):
         await voice_client.disconnect()
         if guild_id in music_queues:
             music_queues[guild_id].clear()
-        await interaction.response.send_message("Disconnected from the voice channel.")
+            embed = discord.Embed(
+                title="Disconnected",
+                description="Exploding in 3... 2... 1...",
+                color=discord.Color.green()
+            )
+        await interaction.response.send_message(embed=embed)
     else:
         await interaction.response.send_message("Bot is not connected to any voice channel.")
 
@@ -216,9 +227,16 @@ async def golira(interaction: discord.Interaction):
     """
     await interaction.response.send_message(golira)
 
+@bot.tree.command(name='sync', description='Synchronizes the slash commands.')
+async def sync_commands(interaction: discord.Interaction):
+    if interaction.user.id == DISCORD_ID:
+        await bot.tree.sync()
+        await interaction.response.send_message("Commands have been synchronized.", ephemeral=True)
+    else:
+        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+
 @bot.event
 async def on_ready():
-    await bot.tree.sync()
     print(f'Logged in as {bot.user}')
 
 bot.run(TOKEN)
